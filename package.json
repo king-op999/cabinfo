@@ -1,6 +1,0 @@
-{
-  "name": "bronx-all-vehicle-api",
-  "version": "1.0.0",
-  "scripts": { "start": "node api/index.js" },
-  "dependencies": { "express": "^4.21.0", "axios": "^1.7.0" }
-}
