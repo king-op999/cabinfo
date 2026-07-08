@@ -1,18 +1,11 @@
-import os
-import subprocess
-import time
+from flask import Flask, jsonify, request
 import requests
 import base64
 import json
-import re
-import signal
-from flask import Flask, jsonify, request
+import os
+import time
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-
-# --- AGGRESSIVE AUTO-KILL ---
-os.system("fuser -k 8080/tcp > /dev/null 2>&1")
-os.system("pkill -9 cloudflared > /dev/null 2>&1")
 
 app = Flask(__name__)
 
@@ -29,15 +22,21 @@ def decrypt(data):
         cipher = AES.new(AES_KEY.encode('utf-8'), AES.MODE_ECB)
         decoded = base64.b64decode(data)
         return unpad(cipher.decrypt(decoded), 16).decode('utf-8')
-    except: return None
+    except:
+        return None
 
 @app.route('/')
 def home():
     rc_no = request.args.get('rc')
     if not rc_no:
-        return jsonify({"status": "error", "message": "Use /?rc=NUMBER", "branding": BRANDING}), 400
+        return jsonify({
+            "status": "error",
+            "message": "Use /?rc=NUMBER",
+            "branding": BRANDING
+        }), 400
 
     url = "https://rcdetailsapi.vehicleinfo.app/api/vasu_rc_doc_details"
+    
     payload = {
         'YLnoBJXFHWIb6n+vaU5Fqw===': 'hEetH/fxDYkaiPV1O08JXGavuWKAHB7H//KqlbPQizq1sxbHamO8edqhIcOJJybWVc4wf11tUxC1uEtwt2OHiKuzQ4fSmex9pkrf6bj/yztMQT9yb5+E3V3RttX0S1WRXRiNakRvo+pOiu6k8j8M+C6aLHvrWxqTQnP9ND0xv3EQyxcgjYt5rk2qVOWP+nf8',
         'uniDRnuJvTpCyd8qqa7bmg===': '6UcabyegT3XEmP2Mw0Jwfw==',
@@ -67,48 +66,56 @@ def home():
     }
 
     try:
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(url, data=payload, headers=headers, timeout=15)
         decrypted = decrypt(response.text)
-        return jsonify({
-            "status": "success", 
-            "branding": BRANDING, 
-            "support": "https://t.me/+8S4n-WRMo_00Yjll",
-            "data": json.loads(decrypted)
-        })
+        
+        if decrypted:
+            return jsonify({
+                "status": "success",
+                "branding": BRANDING,
+                "support": "https://t.me/+8S4n-WRMo_00Yjll",
+                "data": json.loads(decrypted)
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Decryption failed",
+                "raw": response.text[:200]
+            }), 500
+            
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
-# --- SHUTDOWN ROUTE ---
-@app.route('/stop')
-def stop_server():
-    os.system("pkill -9 cloudflared")
-    os.kill(os.getpid(), signal.SIGINT)
-    return "API and Tunnel Stopped Successfully."
 
-if __name__ == "__main__":
-    print("\n" + "="*50)
-    print("🚀 UNLIMITED API STARTING...")
-    print("="*50)
-    
-    tunnel_proc = subprocess.Popen(
-        ["cloudflared", "tunnel", "--url", "http://127.0.0.1:8080"],
-        stderr=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True
-    )
+@app.route('/rc', methods=['GET'])
+def rc_shortcut():
+    """Shortcut: /rc?num=MH02AB1234"""
+    rc_no = request.args.get('num', '')
+    if rc_no:
+        return home()
+    return jsonify({
+        "status": "error",
+        "message": "Use /rc?num=NUMBER or /?rc=NUMBER"
+    }), 400
 
-    url_found = False
-    for i in range(15):
-        line = tunnel_proc.stderr.readline()
-        if "trycloudflare.com" in line:
-            public_url = re.search(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', line)
-            if public_url:
-                print(f"\n✅ LIVE LINK:")
-                print(f"🔗 {public_url.group(0)}/?rc=YOUR_RC_NUMBER")
-                print(f"📁 Source: Channel.html (Free Api Here)")
-                print("\n" + "="*50)
-                url_found = True
-                break
-        time.sleep(1)
-    
-    app.run(host='127.0.0.1', port=8080, debug=False)
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "running",
+        "branding": BRANDING,
+        "service": "RC Details API"
+    })
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"""
+    🔥 RC DETAILS API STARTED
+    📍 Port: {port}
+    💡 Usage: /?rc=MH02AB1234
+    """)
+    app.run(host='0.0.0.0', port=port, debug=False)
