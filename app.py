@@ -2,141 +2,127 @@ from flask import Flask, request, jsonify
 import requests
 import time
 import re
+import os
 
 app = Flask(__name__)
 
-TARGET_URL = "https://offlinechallanapi-3yh6els5ia-uc.a.run.app/vehicle/mobile-no"
+def get_vehicle_token(reg_no):
+    url = "https://www.royalsundaram.in/car-insurance/proxy/apiproxy/eappspolicyservices/getTokenForVehicleDetails"
 
-HEADERS = {
-    "content-type": "application/json",
-    "origin": "https://offlinechallan.com",
-    "referer": "https://offlinechallan.com/",
-    "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36",
-    "accept": "*/*"
-}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "registrationno": reg_no,
+        "origin": "https://www.royalsundaram.in",
+        "referer": "https://www.royalsundaram.in/car-insurance/",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+    }
 
-def validate_reg_number(reg):
-    reg = reg.upper().strip()
-    # Basic Indian registration number format
-    pattern = r'^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{1,4}$'
-    if re.match(pattern, reg):
-        return reg
-    return None
-
-def fetch_mobile(reg_number):
-    payload = {"reg_number": reg_number.upper().strip()}
-    
     try:
-        response = requests.post(TARGET_URL, json=payload, headers=HEADERS, timeout=10)
-        
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                return {
-                    "success": True,
-                    "registration": reg_number.upper(),
-                    "data": data
-                }, 200
-            except:
-                return {
-                    "success": True,
-                    "registration": reg_number.upper(),
-                    "raw_response": response.text
-                }, 200
-        else:
-            return {
-                "success": False,
-                "error": f"API returned status {response.status_code}",
-                "registration": reg_number.upper()
-            }, response.status_code
-            
-    except requests.exceptions.Timeout:
-        return {
-            "success": False,
-            "error": "Request timeout"
-        }, 504
-    except Exception as e:
-        return {
-            "success": False,
-            "error": "Service unavailable"
-        }, 500
+        response = requests.post(url, headers=headers, json={}, timeout=15)
+        return response.json()
+    except:
+        return None
 
-@app.route("/vehicle/mobile-no", methods=["GET", "POST"])
-def get_mobile():
-    start_time = time.time()
+
+def fetch_vehicle_details(token, reg_no):
+    url = "https://www.royalsundaram.in/car-insurance/proxy/apiproxy/eappspolicyservices/getVehicleDetails"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "origin": "https://www.royalsundaram.in",
+        "referer": "https://www.royalsundaram.in/car-insurance/",
+        "registrationno": reg_no,
+        "token": token
+    }
+
+    data = {
+        "registrationNo": reg_no,
+        "token": token
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=15)
+        return response.json()
+    except:
+        return None
+
+
+@app.route('/rc', methods=['GET'])
+def rc_details():
+    reg_no = request.args.get('num', '').strip().upper()
     
-    if request.method == "POST":
-        data = request.get_json()
-        if not data or "reg_number" not in data:
-            return jsonify({
-                "success": False,
-                "error": "Missing 'reg_number' in request body"
-            }), 400
-        reg = data["reg_number"]
-    else:
-        reg = request.args.get("reg") or request.args.get("registration")
-        if not reg:
-            return jsonify({
-                "success": False,
-                "error": "Missing parameter: reg",
-                "usage": "/vehicle/mobile-no?reg=MH02AB1234"
-            }), 400
-    
-    validated_reg = validate_reg_number(reg)
-    if not validated_reg:
+    if not reg_no:
         return jsonify({
-            "success": False,
-            "error": "Invalid registration number format",
+            "error": True,
+            "message": "Registration number required",
+            "usage": "/rc?num=MH02AB1234"
+        }), 400
+    
+    # Validate format
+    if not re.match(r'^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$', reg_no):
+        return jsonify({
+            "error": True,
+            "message": "Invalid registration format",
             "example": "MH02AB1234"
         }), 400
     
-    result, status = fetch_mobile(validated_reg)
+    start_time = time.time()
     
-    response_time = round((time.time() - start_time) * 1000, 2)
+    # Step 1: Get Token
+    token_data = get_vehicle_token(reg_no)
     
-    if isinstance(result, dict):
-        result["meta"] = {
-            "response_time_ms": response_time,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
+    if not token_data or "token" not in token_data:
+        return jsonify({
+            "error": True,
+            "message": "Failed to get token",
+            "token_response": token_data
+        }), 500
     
-    return jsonify(result), status
-
-@app.route("/vehicle/mobile", methods=["GET"])
-def get_mobile_short():
-    """Short endpoint - /vehicle/mobile?reg=MH02AB1234"""
-    return get_mobile()
-
-@app.route("/health", methods=["GET"])
-def health():
+    token = token_data["token"]
+    
+    # Step 2: Get Vehicle Details
+    details = fetch_vehicle_details(token, reg_no)
+    
+    if not details:
+        return jsonify({
+            "error": True,
+            "message": "Failed to fetch vehicle details"
+        }), 500
+    
+    response_time = round(time.time() - start_time, 2)
+    
     return jsonify({
-        "status": "running",
+        "success": True,
+        "registration": reg_no,
+        "data": details,
+        "response_time_seconds": response_time,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     })
 
-@app.route("/")
-def home():
+
+@app.route('/health', methods=['GET'])
+def health():
     return jsonify({
-        "service": "Vehicle to Mobile Number Lookup",
-        "endpoints": {
-            "GET /vehicle/mobile-no?reg=MH02AB1234": "Get mobile number by registration",
-            "POST /vehicle/mobile-no": "POST with JSON body",
-            "GET /vehicle/mobile?reg=MH02AB1234": "Short endpoint",
-            "GET /health": "Health check"
-        },
-        "example": "/vehicle/mobile-no?reg=MH02AB1234"
+        "status": "running",
+        "service": "Royal Sundaram RC API"
     })
 
-if __name__ == "__main__":
-    print("=" * 50)
-    print("Vehicle to Mobile API by @ftgamer2")
-    print("=" * 50)
-    print("GET Example:")
-    print("  http://localhost:5000/vehicle/mobile-no?reg=MH02AB1234")
-    print("")
-    print("POST Example:")
-    print("  curl -X POST http://localhost:5000/vehicle/mobile-no \\")
-    print("    -H 'Content-Type: application/json' \\")
-    print("    -d '{\"reg_number\": \"MH02AB1234\"}'")
-    print("=" * 50)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "service": "Royal Sundaram Vehicle RC API",
+        "usage": "/rc?num=MH02AB1234",
+        "info": "Fetches vehicle details from Royal Sundaram Insurance"
+    })
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
